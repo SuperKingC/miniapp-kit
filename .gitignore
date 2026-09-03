@@ -1,3 +1,10 @@
+node_modules/
+art.config.json
+generated/
+manifest.json
+*.local
+.env*
+smoke_out/
 matting/*.safetensors
 matting/*.pth
 matting/*.onnx

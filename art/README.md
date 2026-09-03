@@ -50,7 +50,10 @@ prompts.txt 每行一条,`name|提示词` 命名(同名文件自动升 `_v2`),`#
 |---|---|
 | 生图 key(变量名由 `api.keyEnv` 指定) | 生图接口鉴权 |
 | `TINYPNG_API_KEY`(`_2`..`_5` 备用自动轮换) | 压缩;401/429 自动切下一个;未配置时跳过压缩并在报告里说明 |
+| `BEN2_WEIGHTS` / `SAM2_CHECKPOINT` / `PYTHON_MATTING` | matting 模块的权重路径与 python 解释器 |
 | LLM 关键词改写复用生图同一把 key | 无需额外配置 |
+
+密钥与路径统一放仓库根 `.env`(已 gitignore,绝不提交),所有工具自动加载,进程环境变量优先;换环境时复制/重填 `.env` 后跑 `node doctor.mjs` 体检。
 
 ## 生图模型参考
 

@@ -2,7 +2,7 @@
 """
 matting/solid_bg_matting.py —— 纯色背景生图抠图验证与工具
 
-两种方法,输出透明 PNG 供对比:
+两种方法,输出透明 PNG 供对比(默认 --method ben2,BEN2 实测首选):
   chroma  色键法:与背景色的色距 + 边框连通性(主体内部的相近色不会被误抠)+ 边缘按色距羽化。
           确定性、零依赖(cv2/numpy),适合边缘干净的卡通素材;背景色与主体色差越大越稳。
   sam2    SAM2 点提示分割(主体居中构图适用)→ 可选 --vitmatte 用 ViTMatte 按 trimap 精修 alpha,
@@ -23,6 +23,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
+
+# 自动加载仓库根 .env(已 gitignore):BEN2_WEIGHTS/SAM2_CHECKPOINT 等只存这里,进程环境变量优先
+_ENV = Path(__file__).resolve().parents[1] / ".env"
+if _ENV.exists():
+    for _line in _ENV.read_text(encoding="utf-8").splitlines():
+        _m = __import__("re").match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$", _line)
+        if _m and _m.group(1) not in os.environ:
+            os.environ[_m.group(1)] = _m.group(2).strip().strip("'\"")
 
 
 def checkerboard(w, h, cell=16):
@@ -135,7 +143,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("image")
     ap.add_argument("outdir")
-    ap.add_argument("--method", default="both", choices=["chroma", "sam2", "ben2", "both", "all"])
+    ap.add_argument("--method", default="ben2", choices=["chroma", "sam2", "ben2", "both", "all"])
     ap.add_argument("--bg", default="auto", help="auto=四角均色,或 R,G,B")
     ap.add_argument("--sam2-ckpt", default=os.environ.get("SAM2_CHECKPOINT", ""))
     ap.add_argument("--ben2-weights", default=os.environ.get("BEN2_WEIGHTS", ""), help="BEN2_Base.safetensors 或 .pth 路径")

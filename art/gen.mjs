@@ -17,6 +17,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+// 仓库根 .env 自动加载(已 gitignore,密钥落盘但不提交);进程环境变量优先
+try {
+  for (const line of fs.readFileSync(new URL('../.env', import.meta.url), 'utf8').split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/)
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '').trim()
+  }
+} catch { /* 无 .env 时跳过 */ }
+
 const VERSION = '0.2.0'
 const REF_MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' }
 const MAX_REF_BYTES = 2 * 1024 * 1024 // 参考图单张 ≤2MB
