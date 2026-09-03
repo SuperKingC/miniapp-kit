@@ -335,6 +335,9 @@ const records = await Promise.all(Array.from({ length: Math.min(itemConcurrency,
 for (const r of records.flat()) manifest.items.push(r)
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
 
+// 预览页:随产物落一份,preview/serve.mjs 指向输出目录即可看效果
+try { fs.copyFileSync(fileURLToPath(new URL('./player.html', import.meta.url)), path.join(outDir, 'player.html')) } catch { /* 缺模板不影响产物 */ }
+
 console.log('\n═══ 生成报告 ═══')
 let totalCost = 0
 const failed = []

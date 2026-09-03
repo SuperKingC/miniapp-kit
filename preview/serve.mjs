@@ -40,7 +40,8 @@ const base = (args.path || '')
   .replace(/^\/+|\/+$/g, '')
 
 const MIME = new Map([
-  ['.gif', 'image/gif'], ['.jpeg', 'image/jpeg'], ['.jpg', 'image/jpeg'], ['.json', 'application/json; charset=utf-8'],
+  ['.gif', 'image/gif'], ['.html', 'text/html; charset=utf-8'], ['.jpeg', 'image/jpeg'], ['.jpg', 'image/jpeg'],
+  ['.json', 'application/json; charset=utf-8'], ['.m4v', 'video/mp4'], ['.mp4', 'video/mp4'],
   ['.png', 'image/png'], ['.svg', 'image/svg+xml'], ['.webp', 'image/webp'], ['.txt', 'text/plain; charset=utf-8'],
 ])
 
@@ -53,6 +54,7 @@ const server = http.createServer((req, res) => {
       if (!urlPath.startsWith(`/${base}/`)) { res.writeHead(404).end(); return }
       rel = urlPath.slice(base.length + 2)
     }
+    rel = rel.replace(/^\/+/, '') // 关键:去掉前导斜杠,否则 Windows 上 path.resolve 会落到盘符根(D:\x)而越界 404
     const full = path.resolve(root, rel)
     const insideRoot = full.startsWith(path.resolve(root) + path.sep)
     if (!insideRoot || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
