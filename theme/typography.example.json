@@ -1,0 +1,22 @@
+{
+  "$comment": "复制本文件为项目里的 typography.json,再跑 node <本仓库>/theme/build-typography.mjs -c <项目>/typography.json 生成 typography.scss。它是全项目字体字号的唯一事实源:组件样式里禁止写裸 font-size / font-family,一律引用生成出来的变量或 .t-* 工具类。字号单位 rpx(750 设计稿)。",
+
+  "fontFamily": {
+    "$comment": "default 全站默认字体:默认系统字体栈,零加载成本零失败风险。number 是数字场景(价格/倒计时)可选专用字体,只含数字与少量符号体积才可控,留空则回退 default。brand 是可选品牌字体:中文字体必须子集化(fontmin 只留用到的字)后传 COS,经 wx.loadFontFace 加载,加载失败自动回退 default——生成器只输出字体名,加载逻辑在项目侧",
+    "default": "-apple-system, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', sans-serif",
+    "number": "",
+    "brand": ""
+  },
+
+  "types": {
+    "$comment": "按文字类型配置,每个类型是 字号+行高+字重 成组的一枚 token。可选字段:family 设为 number/brand 时用对应字体族;numeric 为 true 时输出 font-variant-numeric: tabular-nums(数字等宽,计数跳动不抖)。新增类型直接加键,生成器自动同步变量/自定义属性/工具类三处。",
+    "display":  { "fontSize": 48, "lineHeight": 1.3,  "weight": 600, "numeric": true, "desc": "大数字/价格主数" },
+    "title-lg": { "fontSize": 40, "lineHeight": 1.35, "weight": 600, "desc": "页面大标题" },
+    "title":    { "fontSize": 34, "lineHeight": 1.4,  "weight": 600, "desc": "卡片/区块标题" },
+    "button":   { "fontSize": 30, "lineHeight": 1,    "weight": 500, "desc": "按钮文字" },
+    "body":     { "fontSize": 28, "lineHeight": 1.5,  "weight": 400, "desc": "正文" },
+    "caption":  { "fontSize": 24, "lineHeight": 1.4,  "weight": 400, "desc": "辅助说明/时间" },
+    "aux":      { "fontSize": 20, "lineHeight": 1.3,  "weight": 400, "desc": "角标/tabbar/最小字" },
+    "number":   { "fontSize": 32, "lineHeight": 1,    "weight": 600, "family": "number", "numeric": true, "desc": "计数/倒计时等宽数字" }
+  }
+}

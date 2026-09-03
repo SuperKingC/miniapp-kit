@@ -11,6 +11,11 @@
     "optimizeModel": ""
   },
 
+  "typography": {
+    "$comment": "UI 设计稿字体约束(仅 --ui 模式拼入提示词):全界面统一一种字体,保证 5 张稿方向一致。生图控不了具体字体文件,真实字体以 theme/ 模块的 token 为准;设计稿文案要短(≤5 个词)",
+    "uiFont": "全界面统一使用同一种圆润无衬线中文字体, 字号层级清晰"
+  },
+
   "api": {
     "baseUrl": "https://apirouter.zhiqiteai.cn/ApiRouterServ/v1",
     "keyEnv": "CODEX_API_KEY",

@@ -226,10 +226,12 @@ function dirSize(dir) {
 async function main() {
   let items
   if (opts.ui) {
-    // UI 设计稿模式:5 个排版方向 × 同一界面内容,风格由 style 锚点保证一致
+    // UI 设计稿模式:5 个排版方向 × 同一界面内容,风格由 style 锚点保证一致。
+    // 字体约束:全图统一一种字体(生图只能控方向,控不了字体文件;真实字体以 theme/ token 为准)
+    const uiFont = cfg.typography?.uiFont ?? '全界面统一使用同一种圆润无衬线中文字体, 字号层级清晰'
     items = UI_LAYOUTS.map((hint, i) => ({
       name: `ui-${i + 1}`,
-      text: `移动端App界面设计稿, 完整界面视图。界面内容: ${opts.ui}。排版方向: ${hint}。图标与插画资源丰富, 动效与光影特效点缀, 精致高级质感`,
+      text: `移动端App界面设计稿, 完整界面视图。界面内容: ${opts.ui}。排版方向: ${hint}。${uiFont}。图标与插画资源丰富, 动效与光影特效点缀, 精致高级质感`,
     }))
   } else {
     const promptsFile = path.resolve(opts.prompts)
