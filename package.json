@@ -9,6 +9,6 @@
     "upload-cos": "node cos/upload-cos.mjs"
   },
   "optionalDependencies": {
-    "cos-nodejs-sdk-v5": "^1.4.0"
+    "cos-nodejs-sdk-v5": "^3.0.0"
   }
 }
