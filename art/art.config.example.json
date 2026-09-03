@@ -1,0 +1,32 @@
+{
+  "$comment": "复制本文件为 art.config.json 后按项目修改。密钥只存环境变量名,绝不存 key 值。art.config.json 不提交,提交的是本模板。",
+
+  "style": "扁平卡通插画风格, 造型圆润可爱, 色彩明快, 主色板 #FF8C42 #4A90D9 #FFFFFF, 轮廓描边2px, 纯白背景, 构图居中",
+
+  "api": {
+    "baseUrl": "https://apirouter.zhiqiteai.cn/ApiRouterServ/v1",
+    "keyEnv": "CODEX_API_KEY",
+    "models": [
+      "google/gemini-3.1-flash-image-preview",
+      "google/gemini-3-pro-image-preview",
+      "openai/gpt-5.4-image-2"
+    ]
+  },
+
+  "compress": {
+    "tinypngKeyEnv": "TINYPNG_API_KEY",
+    "maxKB": 180,
+    "format": "png",
+    "packageRedLineMB": 2,
+    "resize": {
+      "*": 1024,
+      "icon-*": 256,
+      "banner-*": 1024
+    }
+  },
+
+  "output": {
+    "inPackage": "generated",
+    "cos": "assets/{project}/"
+  }
+}

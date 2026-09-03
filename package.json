@@ -1,0 +1,13 @@
+{
+  "name": "miniapp-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "小程序通用工具箱:art(美术资产生图流水线)等跨项目工具集",
+  "scripts": {
+    "gen": "node art/gen.mjs -c art.config.json -p prompts.txt"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.33.0"
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+art.config.json
+generated/
+manifest.json
+*.local
+.env*
