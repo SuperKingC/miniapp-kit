@@ -86,6 +86,23 @@ python matting/solid_bg_matting.py <图> <输出目录> --method ben2 --ben2-wei
 python matting/solid_bg_matting.py <图> <输出目录> --method sam2 --sam2-ckpt <sam2.1_hiera_small.pt路径>
 # 色键:零依赖最快,但要求背景色全图唯一(主体内出现背景近色必翻车),仅用于快速粗抠
 python matting/solid_bg_matting.py <图> <输出目录> --method chroma
+# 泛洪去背(实验,不替代默认链路):纯 numpy+PIL 零 cv2 零权重,边框连通+容差,封闭描边卡通素材适用
+python matting/floodfill_matting.py <图> <输出目录> [--tol 42]
 ```
 
 三种方法实测(卡通素材,2048px,2026-09):**BEN2 全自动且简单图(白底/品红底)与复杂图(长毛+镂空篮+气球细线+多主体)均完美**——镂空纹理、细线、毛边全保留;SAM2 在多主体构图下自动提示会失效(需逐对象交互提点),仅适合单主体兜底;色键法会把镂空洞里的背景留成不透明白块。**结论:默认 BEN2,SAM2 兜底,色键粗筛。** 换新环境先跑 `node doctor.mjs` 查抠图依赖是否齐全,缺什么经确认再装。
+
+泛洪实验(2026-09,`floodfill_matting.py`):白底图(内部白胸/白爪/白鱼全保住)与 gpt 直出的低对比假棋盘格图均干净移除;渐变/花纹背景正确触发低占比警告并拒绝瞎抠。定位:无 cv2/torch 环境的兜底与 BEN2 结果的快速对照,默认链路不变。
+
+## 透明底直出探测(probe-transparent.mjs,2026-09)
+
+"提示词能不能直接出透明 PNG 省掉抠图"——**不能,四条路线实测全堵**:
+
+| 路线 | 结果 |
+|---|---|
+| gpt-5.4-image-2 + `image_config.background=transparent` | 中转端点 400,只收 auto/opaque,参数路线不通 |
+| gpt-5.4-image-2 纯提示词 | 返回 PNG 但无 alpha(colorType=2 RGB),且把"透明"画成像素级假棋盘格,提示词明写"严禁棋盘格"也拦不住 |
+| gemini-3.1-flash 纯提示词 | 返回 JPEG,天生无 alpha |
+| gemini-3-pro 纯提示词 | 同上 |
+
+结论:透明素材只走「纯色平涂底 + matting」或「白底图直接放白色容器」;`prompt.background` 规则不变。副产品:`image_size 1K` 可用($0.227/张,约 2K $0.47 的一半),探测类实验建议 1K。重跑:`node art/probe-transparent.mjs -c <项目根>/art.config.json`,结果落 `<项目根>/art/generated-art/probe-transparent/`(含 probe-manifest.json,不走 TinyPNG 保持原始返回)。
