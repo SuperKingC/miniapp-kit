@@ -22,3 +22,9 @@ node D:/Mine/miniapp-kit/art/gen.mjs -c art.config.json -p prompts.txt
 - 密钥一律走环境变量,任何配置文件不落 key。
 - 配置模板(`*.example.json`)入库,项目实际配置不入库。
 - 各模块改动后跑一遍其端到端验证(见各模块 README),中文提交。
+
+## Roadmap
+
+- [ ] `anim/` — 动画制作工作流
+- [ ] `lint/` — 代码规范检查
+- [ ] `size/` — 包体检测
