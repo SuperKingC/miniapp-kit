@@ -1,0 +1,42 @@
+{
+  "$comment": "复制本文件为 anim.config.json 后按项目修改。密钥只存环境变量名,绝不存 key 值。anim.config.json 不提交,提交的是本模板。",
+
+  "api": {
+    "baseUrl": "https://apirouter.zhiqiteai.cn/ApiRouterServ/v1",
+    "keyEnv": "CODEX_API_KEY",
+    "models": ["kwaivgi/kling-v3.0-pro", "kwaivgi/kling-v3.0-std"],
+    "concurrency": 1
+  },
+
+  "video": {
+    "$comment": "resolution 实测 720p 出 1948×1064;candidates>1 时按首尾帧 PSNR 挑最优,费用按条计(pro 档实测 $0.84/条,约 5 分钟);loop: pingpong=首尾帧差超标(PSNR<30dB)自动转正反循环(待机类动画无缝,时长翻倍)|raw=只转码打分不处理|off=保留母带不转码",
+    "resolution": "720p",
+    "candidates": 1,
+    "pollMs": 4000,
+    "timeoutMin": 15,
+    "loop": "pingpong"
+  },
+
+  "transcode": {
+    "$comment": "ffmpeg x264 转码瘦身+去音轨+faststart(实测母带 4.42MB → 约 1.2MB,无损观感)",
+    "crf": 24,
+    "preset": "medium"
+  },
+
+  "frames": {
+    "$comment": "--frames 拆帧/雪碧图(透明叠加、与 DOM 同层用):fps 降帧 8-15,width 缩尺寸 ≤400px 控体积;alpha=true 逐帧抠像出透明雪碧图,alphaMethod=chroma 秒级需 cv2(白底素材首选),ben2 边缘更好但每帧重载模型极慢只适合短片段",
+    "fps": 12,
+    "width": 360,
+    "alpha": false,
+    "alphaMethod": "chroma"
+  },
+
+  "prompt": {
+    "$comment": "追加到每条运动提示词的约束尾缀。原则:图管长相,词管动作——提示词只描述运动,不复述外观,防止模型重绘角色;seamless loop 提示词不被服从(实测),循环交给 pingpong 处理",
+    "append": "镜头固定,动作幅度小而柔和,不要镜头切换,不要新增元素"
+  },
+
+  "output": {
+    "dir": "generated/anim"
+  }
+}
