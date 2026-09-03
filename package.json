@@ -3,7 +3,35 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "小程序通用工具箱:art(美术资产生图流水线)等跨项目工具集",
+  "description": "小程序通用工具箱:跨项目复用的美术/动效/主题/COS 工具集,npm Git 依赖接入,项目只放配置、工具统一升级",
+  "bin": {
+    "miniapp-kit-doctor": "doctor.mjs",
+    "miniapp-kit-gen": "art/gen.mjs",
+    "miniapp-kit-anim": "anim/gen.mjs",
+    "miniapp-kit-cos": "cos/upload-cos.mjs",
+    "miniapp-kit-theme": "theme/build-typography.mjs",
+    "miniapp-kit-preview": "preview/serve.mjs"
+  },
+  "files": [
+    "README.md",
+    "doctor.mjs",
+    "anim/",
+    "art/",
+    "cos/",
+    "matting/",
+    "preview/",
+    "theme/",
+    "!**/*.safetensors",
+    "!**/*.pth",
+    "!**/*.onnx",
+    "!**/__pycache__",
+    "!**/out",
+    "!**/generated*",
+    "!**/smoke_out"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "gen": "node art/gen.mjs -c art.config.json -p prompts.txt",
     "upload-cos": "node cos/upload-cos.mjs"
