@@ -34,13 +34,23 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--ratio') opts.ratio = argv[++i]
   else if (a === '--size') opts.size = argv[++i]
   else if (a === '--ref') opts.refs = String(argv[++i]).split(',').filter(Boolean)
+  else if (a === '--ui') opts.ui = argv[++i]
   else if (a === '--dry-run') opts.dryRun = true
   else if (a === '-h' || a === '--help') opts.help = true
 }
 if (opts.help) {
-  console.log('用法: node art/gen.mjs -c art.config.json -p prompts.txt [--out dir] [--count N] [--ratio 1:1|2:3|3:2] [--size 2K] [--ref 图1,图2] [--dry-run]')
+  console.log('用法: node art/gen.mjs -c art.config.json -p prompts.txt [--out dir] [--count N] [--ratio 1:1|2:3|3:2] [--size 2K] [--ref 图1,图2] [--ui "界面描述"] [--dry-run]')
   process.exit(0)
 }
+
+// UI 设计稿模式:用户说"重新设计某界面"时,一次出 5 张不同排版方向的设计稿供挑选
+const UI_LAYOUTS = [
+  '卡片流布局, 圆角卡片纵向排布, 层次分明',
+  '双列网格布局, 宫格卡片错落有致',
+  '沉浸式大图布局, 大幅视觉区配悬浮元素',
+  '分区列表布局, 顶部标签页导航加分区内容',
+  '混合布局, 顶部轮播加宫格加浮动操作按钮',
+]
 
 function die(msg) { console.error(`[art] 错误: ${msg}`); process.exit(1) }
 
@@ -57,6 +67,8 @@ const imageConfig = {
   aspect_ratio: opts.ratio || cfg.imageConfig?.aspect_ratio || '1:1',
   image_size: opts.size || cfg.imageConfig?.image_size || '2K',
 }
+// UI 设计稿是手机竖屏形态,覆盖 config 的正方形默认(显式 --ratio 仍最高)
+if (opts.ui && !opts.ratio) imageConfig.aspect_ratio = '2:3'
 // gpt 系生图模型才发 image_config(Pet10 生产验证);gemini 系未验证,不发以防 400
 const supportsImageConfig = (model) => /^openai\//.test(model) && /image/.test(model)
 
@@ -77,9 +89,12 @@ function loadRefs() {
 // ---------- 关键词优化 ----------
 function composePrompt(cfg, text) {
   const boosters = cfg.prompt?.boosters ?? []
-  const bans = cfg.prompt?.bans ?? ['画面中出现任何文字、字母、数字', '水印', 'logo']
-  // 背景单独配置(抠图友好:选主体色板里没有的颜色);提示词里自己写了"背景"则不追加,避免两处打架
-  const background = /背景/.test(text) ? '' : (cfg.prompt?.background ?? '')
+  // UI 设计稿需要界面文案,自动放宽"文字"类禁则(水印/logo 禁则保留)
+  const bans = (cfg.prompt?.bans ?? ['画面中出现任何文字、字母、数字', '水印', 'logo'])
+    .filter((b) => !(opts.ui && /文字|字母|数字/.test(b)))
+  // 背景单独配置(抠图友好:选主体色板里没有的颜色);提示词里自己写了"背景"则不追加,避免两处打架;
+  // UI 设计稿自带完整界面视图,不追加默认背景(其"无阴影"还会与光影特效要求冲突)
+  const background = opts.ui || /背景/.test(text) ? '' : (cfg.prompt?.background ?? '')
   const seen = new Set()
   const parts = [cfg.style, background, text, ...boosters].flatMap((s) => String(s).split(/[,,.]\s*/)).filter(Boolean)
   const deduped = parts.filter((s) => { const k = s.trim(); if (seen.has(k)) return false; seen.add(k); return true })
@@ -201,20 +216,29 @@ function dirSize(dir) {
 
 // ---------- 主流程 ----------
 async function main() {
-  const promptsFile = path.resolve(opts.prompts)
-  if (!fs.existsSync(promptsFile)) die(`提示词文件不存在: ${promptsFile}`)
-  const items = []
-  const seen = new Set()
-  for (const raw of fs.readFileSync(promptsFile, 'utf8').split(/\r?\n/)) {
-    const line = raw.trim()
-    if (!line || line.startsWith('#')) continue
-    const m = line.match(/^([\w-]+)\s*\|\s*(.+)$/)
-    const name = m ? m[1] : line.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'img'
-    if (seen.has(name)) die(`提示词名称重复: ${name}`)
-    seen.add(name)
-    items.push({ name, text: m ? m[2] : line })
+  let items
+  if (opts.ui) {
+    // UI 设计稿模式:5 个排版方向 × 同一界面内容,风格由 style 锚点保证一致
+    items = UI_LAYOUTS.map((hint, i) => ({
+      name: `ui-${i + 1}`,
+      text: `移动端App界面设计稿, 完整界面视图。界面内容: ${opts.ui}。排版方向: ${hint}。图标与插画资源丰富, 动效与光影特效点缀, 精致高级质感`,
+    }))
+  } else {
+    const promptsFile = path.resolve(opts.prompts)
+    if (!fs.existsSync(promptsFile)) die(`提示词文件不存在: ${promptsFile}`)
+    items = []
+    const seen = new Set()
+    for (const raw of fs.readFileSync(promptsFile, 'utf8').split(/\r?\n/)) {
+      const line = raw.trim()
+      if (!line || line.startsWith('#')) continue
+      const m = line.match(/^([\w-]+)\s*\|\s*(.+)$/)
+      const name = m ? m[1] : line.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'img'
+      if (seen.has(name)) die(`提示词名称重复: ${name}`)
+      seen.add(name)
+      items.push({ name, text: m ? m[2] : line })
+    }
   }
-  if (items.length === 0) die('提示词文件为空')
+  if (items.length === 0) die('提示词为空')
 
   const outDir = path.resolve(opts.out || cfg.output.inPackage || 'generated')
   fs.mkdirSync(outDir, { recursive: true })
