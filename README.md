@@ -1,30 +1,22 @@
 # miniapp-kit — 小程序通用工具箱
 
-跨项目复用的小程序开发工具集。每个子目录一个独立工具,互不依赖,按需取用。
+跨项目复用的小程序开发工具集。每个子目录一个独立工具,互不依赖,按需取用;项目里只放配置,工具统一升级。
 
-## 目录
+## 模块
 
 | 模块 | 用途 | 文档 |
 |---|---|---|
-| `art/` | 美术资产生图流水线:关键词优化 → 并发生图 → TinyPNG 压缩 → 防缓存命名 → manifest 留痕 → 主包体积红线 | [art/README.md](art/README.md) |
-| `cos/` | COS 资产 SHA 版本化上传(immutable 缓存,默认 dry-run) | 脚本内注释 |
+| `art/` | 美术资产生图流水线:关键词优化 → 并发生图 → TinyPNG 压缩 → 防缓存命名 → manifest 留痕 → 体积红线 | [art/README.md](art/README.md) |
+| `matting/` | 纯色背景抠图(色键 / SAM2±ViTMatte),生图后出透明底素材 | 脚本 docstring |
+| `preview/` | 本机静态服务,模拟器本地预览待上传 COS 的资产,不经外网 | 脚本 docstring |
+| `cos/` | COS 资产 SHA 版本化上传(immutable 缓存,默认 dry-run) | 脚本 docstring |
 
-## 使用方式
+## 通用约定
 
-各项目引用本仓库内脚本,配置文件放在项目自己仓库里:
-
-```bash
-# 例:在某个小程序项目里生图
-node D:/Mine/miniapp-kit/art/gen.mjs -c art.config.json -p prompts.txt
-# 发版资产按 SHA 版本化上传 COS(默认 dry-run,--yes 才上传)
-node D:/Mine/miniapp-kit/cos/upload-cos.mjs --dir <待传目录> --prefix https://<bucket>.cos.<region>.myqcloud.com/<项目>/
-```
-
-## 约定
-
-- 密钥一律走环境变量,任何配置文件不落 key。
-- 配置模板(`*.example.json`)入库,项目实际配置不入库。
-- 各模块改动后跑一遍其端到端验证(见各模块 README),中文提交。
+1. 密钥一律走环境变量,任何文件不落 key 值。
+2. 配置模板(`*.example.json`)入库,项目实际配置(含中转地址)不入库。
+3. 模块改动必须跑一遍各自的端到端验证再提交,提交信息用中文。
+4. 每个 CLI 默认行为安全:能 dry-run 的先 dry-run,能不覆盖的不覆盖。
 
 ## Roadmap
 

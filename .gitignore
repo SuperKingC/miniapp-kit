@@ -4,3 +4,5 @@ generated/
 manifest.json
 *.local
 .env*
+matting/out/
+smoke_out/

@@ -78,8 +78,10 @@ function loadRefs() {
 function composePrompt(cfg, text) {
   const boosters = cfg.prompt?.boosters ?? []
   const bans = cfg.prompt?.bans ?? ['画面中出现任何文字、字母、数字', '水印', 'logo']
+  // 背景单独配置(抠图友好:选主体色板里没有的颜色);提示词里自己写了"背景"则不追加,避免两处打架
+  const background = /背景/.test(text) ? '' : (cfg.prompt?.background ?? '')
   const seen = new Set()
-  const parts = [cfg.style, text, ...boosters].flatMap((s) => String(s).split(/[,,.]\s*/)).filter(Boolean)
+  const parts = [cfg.style, background, text, ...boosters].flatMap((s) => String(s).split(/[,,.]\s*/)).filter(Boolean)
   const deduped = parts.filter((s) => { const k = s.trim(); if (seen.has(k)) return false; seen.add(k); return true })
   return `${deduped.join(', ')}.${bans.length ? ` 画面中禁止:${bans.join('、')}` : ''}`
 }
@@ -238,7 +240,7 @@ async function main() {
   const refs = loadRefs()
   const keys = tinifyKeys(cfg)
   const dead = new Set()
-  const stats = { totalCost: 0, compressionCount: null, failed: 0 }
+  const stats = { totalCost: 0, compressionCount: null, failed: 0, report: [] }
 
   async function worker(queue) {
     while (queue.length) {
@@ -269,8 +271,9 @@ async function main() {
             elapsedSec: Math.round((Date.now() - t0) / 1000), at: new Date().toISOString(),
           })
           stats.totalCost += r.cost / r.images.length
-          const warn = c.buf.length > maxKB * 1024 ? ` ⚠ 超过 ${maxKB}KB,请人工处理(不自动二次压缩,保色彩保清晰)` : ''
-          console.log(`  ✓ ${u.name} ← [${u.model}] ${file} ${dim.w}x${dim.h} ${(c.buf.length / 1024).toFixed(0)}KB ${Math.round((Date.now() - t0) / 1000)}s${c.compressed ? '' : `(${c.note})`}${warn}`)
+          const over = c.buf.length > maxKB * 1024
+          stats.report.push({ file, model: u.model, cost: r.cost / r.images.length, w: dim.w, h: dim.h, bytes: c.buf.length, elapsed: Math.round((Date.now() - t0) / 1000), prompt: u.finalPrompt, over, compressed: c.compressed, note: c.note })
+          console.log(`  ✓ ${u.name} ← [${u.model}] ${file} ${dim.w}x${dim.h} ${(c.buf.length / 1024).toFixed(0)}KB ${Math.round((Date.now() - t0) / 1000)}s`)
         }
       } catch (e) {
         stats.failed++
@@ -282,8 +285,19 @@ async function main() {
   await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => worker(queue)))
 
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
-  console.log(`\n[manifest] ${manifestPath}(累计 ${manifest.items.length} 条)`)
-  console.log(`[成本] 本次 $${stats.totalCost.toFixed(3)}${stats.compressionCount !== null ? ` | TinyPNG 本月已用 ${stats.compressionCount} 张` : ''}`)
+
+  // 生成报告:每张图提示词/模型/花费一目了然,可直接转发
+  console.log('\n═══ 生成报告 ═══')
+  for (const it of stats.report) {
+    console.log(`${it.file} | ${it.model} | $${it.cost.toFixed(4)} | ${it.w}x${it.h} ${(it.bytes / 1024).toFixed(0)}KB | ${it.elapsed}s${it.compressed ? '' : ` | ${it.note}`}`)
+    console.log(`  提示词: ${it.prompt}`)
+  }
+  const overs = stats.report.filter((it) => it.over)
+  if (overs.length) {
+    console.log(`\n[提醒] ${overs.length} 张超过 ${maxKB}KB(压缩一次后仍超): ${overs.map((o) => o.file).join(', ')}`)
+    console.log('  未做二次压缩/降质(保色彩保清晰度)。若包体不够,由人工决策:缩小显示尺寸 / 裁切留白 / 走 COS 下发,不要压质量。')
+  }
+  console.log(`\n[成本] 本次 $${stats.totalCost.toFixed(3)}${stats.compressionCount !== null ? ` | TinyPNG 本月已用 ${stats.compressionCount} 张` : ''}`)
   const size = dirSize(outDir)
   const over = size > maxTotalMB * 1024 * 1024
   console.log(`[红线] ${outDir} ${(size / 1048576).toFixed(2)}MB / ${maxTotalMB}MB ${over ? '❌ 超限' : '✅'}`)

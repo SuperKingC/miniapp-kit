@@ -1,10 +1,11 @@
 {
   "$comment": "复制本文件为 art.config.json 后按项目修改。密钥只存环境变量名,绝不存 key 值。art.config.json 不提交,提交的是本模板。",
 
-  "style": "扁平卡通插画风格, 造型圆润可爱, 色彩明快, 主色板 #FF8C42 #4A90D9 #FFFFFF, 轮廓描边2px, 纯白背景, 构图居中",
+  "style": "扁平卡通插画风格, 造型圆润可爱, 色彩明快, 轮廓描边2px, 构图居中",
 
   "prompt": {
-    "$comment": "boosters 拼接到每条提示词做关键词增强;bans 是禁则;optimizeModel 填文本模型 ID 则生图前先让 LLM 改写关键词(留空关闭)",
+    "$comment": "background 是默认背景描述(提示词里自己写了'背景'则不追加);抠图用背景选主体色板里没有的纯色,平涂无渐变无阴影。boosters 拼到每条提示词做增强;bans 是禁则;optimizeModel 填文本模型 ID 可让 LLM 先改写关键词(留空关闭)",
+    "background": "纯白色平涂背景, 无渐变无阴影",
     "boosters": ["高清细节", "专业插画构图"],
     "bans": ["画面中出现任何文字、字母、数字", "水印", "logo"],
     "optimizeModel": ""
@@ -22,13 +23,13 @@
   },
 
   "imageConfig": {
-    "$comment": "仅对 openai 系生图模型生效(Pet10 生产验证);aspect_ratio: 1:1|2:3|3:2",
+    "$comment": "仅对 openai 系生图模型生效;aspect_ratio: 1:1|2:3|3:2",
     "aspect_ratio": "1:1",
     "image_size": "2K"
   },
 
   "compress": {
-    "$comment": "只走 TinyPNG 单次压缩保色彩,不做本地预压;超 maxKB 只告警不自动二次压。备用 key: TINYPNG_API_KEY_2..5,401/429 自动轮换",
+    "$comment": "只走 TinyPNG 单次压缩,无本地预压;超 maxKB 只在最后提醒,不做二次压缩。备用 key: TINYPNG_API_KEY_2..5,401/429 自动轮换",
     "tinypngKeyEnv": "TINYPNG_API_KEY",
     "maxKB": 180
   },
