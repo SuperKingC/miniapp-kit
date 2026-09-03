@@ -8,6 +8,8 @@
 |---|---|---|
 | `art/` | 美术资产生图流水线:关键词优化 → 并发生图 → TinyPNG 压缩 → 防缓存命名 → manifest 留痕 → 体积红线 | [art/README.md](art/README.md) |
 | `matting/` | 纯色背景抠图(色键 / SAM2±ViTMatte),生图后出透明底素材 | 脚本 docstring |
+| `anim/` | 动画四层:L1 CSS 动效预设 / L2 canvas 粒子引擎 / L3 Lottie(按需)/ L4 AI 图生视频(走 COS) | [anim/README.md](anim/README.md) |
+| `theme/` | 字体字号 token:typography.json 单一事实源 → 生成 typography.scss,默认系统字体栈,字号按文字类型配置 | [theme/README.md](theme/README.md) |
 | `preview/` | 本机静态服务,模拟器本地预览待上传 COS 的资产,不经外网 | 脚本 docstring |
 | `cos/` | COS 资产 SHA 版本化上传(immutable 缓存,默认 dry-run) | 脚本 docstring |
 
@@ -22,6 +24,6 @@
 
 ## Roadmap
 
-- [ ] `anim/` — 动画制作工作流
-- [ ] `lint/` — 代码规范检查
+- [ ] `anim/gen.mjs` — 图生视频流水线封装(三步异步协议已实测,多候选+ffmpeg 循环检测待建)
+- [ ] `lint/` — 代码规范检查(含 WXSS 裸 font-size/font-family 检查)
 - [ ] `size/` — 包体检测

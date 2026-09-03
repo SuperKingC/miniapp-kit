@@ -47,6 +47,11 @@ let cosOk = false
 try { await import('cos-nodejs-sdk-v5'); cosOk = true } catch { }
 check('cos-nodejs-sdk-v5(cos 模块用)', cosOk, cosOk ? '已安装' : '未安装', '在本仓库 npm install(可选依赖)')
 
+// 4.5 动画流水线(anim/):视频转码/循环检测/抽帧质检用 ffmpeg
+let ffmpegVer = ''
+try { ffmpegVer = execSync('ffmpeg -version', { stdio: 'pipe', timeout: 15_000 }).toString().split('\n')[0].replace(/^ffmpeg version /i, '').trim().slice(0, 30) } catch { }
+check('ffmpeg(anim/ 视频转码/质检用)', !!ffmpegVer, ffmpegVer || '未找到', 'winget install Gyan.FFmpeg(或 ffmpeg.org 下载)后重开终端')
+
 // 5. 抠图环境:色键(任意 cv2)与 SAM2 管线(torch+sam2+transformers)
 function pyProbe(code) {
   const candidates = [process.env.PYTHON_MATTING, 'python', 'python3'].filter(Boolean)

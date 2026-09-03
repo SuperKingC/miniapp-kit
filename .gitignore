@@ -10,3 +10,4 @@ matting/*.pth
 matting/*.onnx
 matting/out/
 matting/__pycache__/
+generated-art/

@@ -1,0 +1,90 @@
+/**
+ * anim/presets.scss —— L1 CSS 动效预设(储备层,零成本覆盖 90% UI 动效)
+ *
+ * 用法:全局样式里 @import '<本仓库>/anim/presets.scss'; 元素加对应类名即可。
+ * 原则:只动 transform / opacity(合成器友好,60fps),严禁动 width/height/margin 等布局属性;
+ *       循环动画用 ease-in-out 避免机械感;入场动画用 both/forwards 保持结束帧。
+ *
+ * 微信小程序注意:
+ *   - 按压反馈用 hover-class(小程序没有 CSS :active):<view hover-class="anim-press" hover-stay-time="80">
+ *   - 伪元素(::after)在 WXSS 里可用,anim-shine 依赖它
+ *   - 页面级进场给根节点加 anim-fade-up 即可,列表项可按 index 递增 animation-delay 做级联
+ */
+
+// ---------- 循环氛围类 ----------
+// 呼吸:卡片入口光效、按钮引导
+.anim-breathe { animation: anim-breathe 2.4s ease-in-out infinite; }
+@keyframes anim-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+// 浮动:悬浮元素、气泡
+.anim-float { animation: anim-float 3s ease-in-out infinite; }
+@keyframes anim-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8rpx); }
+}
+
+// 骨架屏:配合灰色底块使用
+.anim-skeleton { animation: anim-skeleton 1.2s ease-in-out infinite; }
+@keyframes anim-skeleton {
+  0% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+  100% { opacity: 0.45; }
+}
+
+// 旋转:加载指示
+.anim-spin { animation: anim-spin 1s linear infinite; }
+@keyframes anim-spin {
+  to { transform: rotate(360deg); }
+}
+
+// ---------- 入场类 ----------
+// 弹出:弹窗、奖励卡片(带一点过冲,更"Q")
+.anim-pop { animation: anim-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes anim-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+// 淡入上移:页面/列表项进场
+.anim-fade-up { animation: anim-fade-up 0.4s ease-out both; }
+@keyframes anim-fade-up {
+  from { transform: translateY(24rpx); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+// 右滑入:抽屉、侧边内容
+.anim-slide-in { animation: anim-slide-in 0.3s ease-out both; }
+@keyframes anim-slide-in {
+  from { transform: translateX(48rpx); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+// ---------- 反馈类 ----------
+// 摇晃:输错、警示(播一次自动停)
+.anim-shake { animation: anim-shake 0.4s ease-in-out; }
+@keyframes anim-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-8rpx); }
+  75% { transform: translateX(8rpx); }
+}
+
+// 按压:hover-class 专用,离开自动弹回
+.anim-press { transform: scale(0.96); opacity: 0.9; }
+
+// 扫光:入口卡片高光划过;宿主需 position:relative + overflow:hidden
+.anim-shine { position: relative; overflow: hidden; }
+.anim-shine::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -60%;
+  width: 40%; height: 100%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  animation: anim-shine 2.8s ease-in-out infinite;
+}
+@keyframes anim-shine {
+  0% { left: -60%; }
+  40%, 100% { left: 120%; }
+}
