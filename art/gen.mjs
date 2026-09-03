@@ -1,326 +1,298 @@
 #!/usr/bin/env node
 /**
- * miniart-kit —— 小程序美术资产生图流水线
+ * miniapp-kit/art —— 小程序美术资产生图流水线 v0.2
  *
- * 流程:提示词组装(风格锚定) → 调 chat/completions 生图 → 多图去重命名
- *       → TinyPNG 压缩(降分辨率→压质量) → 防缓存升文件名 → manifest 留痕 → 主包体积红线检查
+ * 流程:关键词优化(风格锚定+增强词+禁则,可选 LLM 改写) → 并发生图(多模型 fallback,
+ *       支持 --ref 参考图图生图、--ratio/--size 控图) → TinyPNG 压缩(多 key 轮换,
+ *       单次压缩保色彩,不做本地预压) → 防缓存升文件名 → manifest 留痕 → 主包体积红线
  *
  * 用法:
- *   node gen.mjs --config path/to/art.config.json --prompts prompts.txt
- *   node gen.mjs -c art.config.json -p prompts.txt --out override/dir
+ *   node art/gen.mjs -c art.config.json -p prompts.txt [--out dir] [--count N]
+ *        [--ratio 1:1|2:3|3:2] [--size 2K] [--ref 图1,图2] [--dry-run]
  *
- * prompts.txt 格式:每行一条,支持 `name|prompt` 前缀命名;# 开头为注释。
- *   icon-home|主页入口图标,圆形,猫爪元素
- * 密钥:只从环境变量读取(config.api.keyEnv 指定变量名),绝不写入配置文件。
+ * prompts.txt:每行一条,`name|提示词` 命名,# 注释。
+ * 密钥只从环境变量读(config 指定变量名),禁止写入任何文件。
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import fs from 'node:fs'
+import path from 'node:path'
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0'
+const REF_MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' }
+const MAX_REF_BYTES = 2 * 1024 * 1024 // 参考图单张 ≤2MB
+const MAX_REFS = 2
 
 // ---------- CLI ----------
-function parseArgs(argv) {
-  const args = { config: 'art.config.json', prompts: 'prompts.txt' };
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '-c' || a === '--config') args.config = argv[++i];
-    else if (a === '-p' || a === '--prompts') args.prompts = argv[++i];
-    else if (a === '--out') args.out = argv[++i];
-    else if (a === '--dry-run') args.dryRun = true;
-    else if (a === '-h' || a === '--help') args.help = true;
-  }
-  return args;
+const argv = process.argv.slice(2)
+const opts = { config: 'art.config.json', prompts: 'prompts.txt', count: 1 }
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i]
+  if (a === '-c') opts.config = argv[++i]
+  else if (a === '-p') opts.prompts = argv[++i]
+  else if (a === '--out') opts.out = argv[++i]
+  else if (a === '--count') opts.count = Math.max(1, +argv[++i] || 1)
+  else if (a === '--ratio') opts.ratio = argv[++i]
+  else if (a === '--size') opts.size = argv[++i]
+  else if (a === '--ref') opts.refs = String(argv[++i]).split(',').filter(Boolean)
+  else if (a === '--dry-run') opts.dryRun = true
+  else if (a === '-h' || a === '--help') opts.help = true
+}
+if (opts.help) {
+  console.log('用法: node art/gen.mjs -c art.config.json -p prompts.txt [--out dir] [--count N] [--ratio 1:1|2:3|3:2] [--size 2K] [--ref 图1,图2] [--dry-run]')
+  process.exit(0)
 }
 
-function die(msg) {
-  console.error(`[miniart] 错误: ${msg}`);
-  process.exit(1);
+function die(msg) { console.error(`[art] 错误: ${msg}`); process.exit(1) }
+
+// ---------- 配置 ----------
+const cfgPath = path.resolve(opts.config)
+if (!fs.existsSync(cfgPath)) die(`配置不存在: ${cfgPath}(模板见 art/art.config.example.json)`)
+const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'))
+for (const k of ['style', 'api', 'compress', 'output']) if (!(k in cfg)) die(`配置缺少必填字段: ${k}`)
+if (!Array.isArray(cfg.api.models) || cfg.api.models.length === 0) die('api.models 至少配置一个模型')
+const maxKB = cfg.compress.maxKB ?? 180
+const maxTotalMB = cfg.output.maxTotalMB ?? 2
+const concurrency = Math.max(1, cfg.api.concurrency ?? 3)
+const imageConfig = {
+  aspect_ratio: opts.ratio || cfg.imageConfig?.aspect_ratio || '1:1',
+  image_size: opts.size || cfg.imageConfig?.image_size || '2K',
+}
+// gpt 系生图模型才发 image_config(Pet10 生产验证);gemini 系未验证,不发以防 400
+const supportsImageConfig = (model) => /^openai\//.test(model) && /image/.test(model)
+
+// ---------- 参考图 ----------
+function loadRefs() {
+  const paths = opts.refs || []
+  if (paths.length > MAX_REFS) die(`参考图最多 ${MAX_REFS} 张`)
+  return paths.map((p) => {
+    const full = path.resolve(p)
+    const buf = fs.readFileSync(full)
+    if (buf.length > MAX_REF_BYTES) die(`参考图超限(≤2MB): ${p}`)
+    const mime = REF_MIME[path.extname(full).toLowerCase()]
+    if (!mime) die(`参考图只支持 jpg/png/webp: ${p}`)
+    return { type: 'image_url', image_url: { url: `data:${mime};base64,${buf.toString('base64')}` } }
+  })
 }
 
-// ---------- 配置加载与校验 ----------
-function loadConfig(p) {
-  if (!fs.existsSync(p)) die(`配置文件不存在: ${p}`);
-  const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
-  for (const k of ['style', 'api', 'compress', 'output']) {
-    if (!(k in cfg)) die(`配置缺少必填字段: ${k}`);
-  }
-  if (!Array.isArray(cfg.api.models) || cfg.api.models.length === 0) {
-    die('api.models 至少配置一个模型');
-  }
-  return cfg;
+// ---------- 关键词优化 ----------
+function composePrompt(cfg, text) {
+  const boosters = cfg.prompt?.boosters ?? []
+  const bans = cfg.prompt?.bans ?? ['画面中出现任何文字、字母、数字', '水印', 'logo']
+  const seen = new Set()
+  const parts = [cfg.style, text, ...boosters].flatMap((s) => String(s).split(/[,,.]\s*/)).filter(Boolean)
+  const deduped = parts.filter((s) => { const k = s.trim(); if (seen.has(k)) return false; seen.add(k); return true })
+  return `${deduped.join(', ')}.${bans.length ? ` 画面中禁止:${bans.join('、')}` : ''}`
 }
 
-function loadPrompts(p) {
-  if (!fs.existsSync(p)) die(`提示词文件不存在: ${p}`);
-  const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/);
-  const items = [];
-  const seen = new Set();
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    let name = null;
-    let text = line;
-    const m = line.match(/^([\w-]+)\s*\|\s*(.+)$/);
-    if (m) { name = m.group1 ?? m[1]; text = m[2]; }
-    if (!name) name = slugify(text);
-    if (seen.has(name)) die(`提示词名称重复: ${name}`);
-    seen.add(name);
-    items.push({ name, text });
-  }
-  if (items.length === 0) die('提示词文件为空');
-  return items;
-}
-
-function slugify(s) {
-  const cjk = s.match(/[\u4e00-\u9fa5]{2,4}/g);
-  const ascii = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
-  return (ascii || (cjk ? cjk.slice(0, 2).join('-') : 'img')).slice(0, 40);
+async function optimizeWithLLM(cfg, text) {
+  const model = cfg.prompt?.optimizeModel
+  if (!model) return text
+  const res = await fetch(`${cfg.api.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env[cfg.api.keyEnv]}` },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: '你是生图提示词优化器:把输入改写成一段细节丰富的中文生图提示词。不得改变主体与意图,可补充构图、光影、材质细节。只输出改写后的提示词,不要解释。' },
+        { role: 'user', content: text },
+      ],
+    }),
+    signal: AbortSignal.timeout(60_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  const out = data?.choices?.[0]?.message?.content?.trim()
+  if (!out) { console.warn('[art] 关键词 LLM 优化失败,用原始提示词'); return text }
+  return out
 }
 
 // ---------- 生图 ----------
-const IMAGE_MODELS_HINT = /(image|banana|seedream|cogview|flux)/i;
-
-async function generateImage(cfg, prompt, model) {
-  const keyEnv = cfg.api.keyEnv || 'CODEX_API_KEY';
-  const key = process.env[keyEnv];
-  if (!key) die(`环境变量 ${keyEnv} 未设置,无法调用生图接口`);
-
-  const base = cfg.api.baseUrl.replace(/\/+$/, '');
-  const body = {
-    model,
-    messages: [{ role: 'user', content: prompt }],
-    modalities: ['image', 'text'],
-  };
-  const res = await fetch(`${base}/chat/completions`, {
+async function generateImage(cfg, model, fullPrompt, refs) {
+  const key = process.env[cfg.api.keyEnv || 'CODEX_API_KEY']
+  if (!key) die(`环境变量 ${cfg.api.keyEnv || 'CODEX_API_KEY'} 未设置`)
+  const content = refs.length === 0
+    ? fullPrompt
+    : [{ type: 'text', text: fullPrompt }, ...refs]
+  const body = { model, messages: [{ role: 'user', content }], modalities: ['image', 'text'] }
+  if (supportsImageConfig(model)) body.image_config = { aspect_ratio: imageConfig.aspect_ratio, image_size: imageConfig.image_size }
+  const res = await fetch(`${cfg.api.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
-  let data;
-  try { data = JSON.parse(text); } catch { throw new Error(`返回非 JSON: ${text.slice(0, 200)}`); }
-  if (data.error) throw new Error(`接口错误: ${JSON.stringify(data.error).slice(0, 300)}`);
-
-  const msg = data.choices?.[0]?.message || {};
-  const images = Array.isArray(msg.images) ? msg.images : [];
-  const out = [];
-  const seenDataUrl = new Set();
-  for (const im of images) {
-    const url = im?.image_url?.url || '';
-    const m = url.match(/^data:image\/(\w+);base64,(.+)$/);
-    if (!m) continue;
-    // 同一响应里重复的 base64 只保留一张(gemini-3-pro 实测会一次吐多张相同图)
-    if (seenDataUrl.has(m[2])) continue;
-    seenDataUrl.add(m[2]);
-    out.push({ ext: m[1] === 'jpeg' ? 'jpg' : m[1], buf: Buffer.from(m[2], 'base64') });
-  }
+    signal: AbortSignal.timeout(300_000),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (data.error) throw new Error(`接口错误: ${JSON.stringify(data.error).slice(0, 300)}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(data).slice(0, 300)}`)
+  const msg = data.choices?.[0]?.message ?? {}
+  const images = [...new Set((msg.images ?? [])
+    .map((im) => im?.image_url?.url)
+    .filter((u) => typeof u === 'string' && /^data:image\/\w+;base64,/.test(u)))]
   return {
-    images: out,
-    content: (msg.content || '').trim(),
+    images: images.map((u) => {
+      const m = u.match(/^data:image\/(\w+);base64,(.+)$/s)
+      return { ext: m[1] === 'jpeg' ? 'jpg' : m[1], buf: Buffer.from(m[2], 'base64') }
+    }),
+    text: (msg.content ?? '').trim(),
     cost: data.usage?.cost ?? 0,
-    imageTokens: data.usage?.completion_tokens_details?.image_tokens ?? 0,
-  };
-}
-
-// ---------- TinyPNG 压缩 ----------
-async function tinifyFromBuffer(key, buf) {
-  const res = await fetch('https://api.tinify.com/shrink', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${Buffer.from(`api:${key}`).toString('base64')}`,
-      'Content-Type': 'application/octet-stream',
-    },
-    body: buf,
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`TinyPNG HTTP ${res.status}: ${t.slice(0, 200)}`);
   }
-  const j = await res.json();
-  const loc = j?.output?.url;
-  if (!loc) throw new Error(`TinyPNG 返回异常: ${JSON.stringify(j).slice(0, 200)}`);
-  const dl = await fetch(loc);
-  return Buffer.from(await dl.arrayBuffer());
 }
 
-/** 降分辨率(纯 Node 无依赖,PNG/JPEG 均按最大边缩放到 maxSide) */
-async function downscale(buf, maxSide) {
-  if (!maxSide) return buf;
-  const dim = readPngOrJpegSize(buf);
-  if (!dim) return buf;
-  const long = Math.max(dim.w, dim.h);
-  if (long <= maxSide) return buf;
-  const ratio = maxSide / long;
-  return await sharpDownscale(buf, Math.round(dim.w * ratio), Math.round(dim.h * ratio));
+// ---------- TinyPNG(多 key 轮换,单次压缩保色彩) ----------
+function tinifyKeys(cfg) {
+  const primary = cfg.compress.tinypngKeyEnv || 'TINYPNG_API_KEY'
+  return [primary, `${primary}_2`, `${primary}_3`, `${primary}_4`, `${primary}_5`]
+    .map((n) => process.env[n]?.trim()).filter(Boolean)
 }
 
-// 最小化 PNG/JPEG 尺寸读取(避免为读尺寸引入依赖)
-function readPngOrJpegSize(buf) {
-  // PNG
-  if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) {
-    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+async function tinifyCompress(buf, keys, dead, stats) {
+  if (keys.length === 0) return { buf, compressed: false, note: '未配置 TinyPNG key,跳过压缩' }
+  for (const key of keys) {
+    if (dead.has(key)) continue
+    const auth = `Basic ${Buffer.from(`api:${key}`).toString('base64')}`
+    const post = await fetch('https://api.tinify.com/shrink', {
+      method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/octet-stream' },
+      body: buf, signal: AbortSignal.timeout(120_000),
+    })
+    if (post.status === 401 || post.status === 429) { dead.add(key); continue } // 无效/配额尽 → 轮换
+    if (!post.ok) throw new Error(`TinyPNG HTTP ${post.status}: ${(await post.text()).slice(0, 200)}`)
+    const count = post.headers.get('compression-count')
+    if (count) stats.compressionCount = +count
+    const { output } = await post.json()
+    const out = Buffer.from(await (await fetch(output.url, { headers: { Authorization: auth }, signal: AbortSignal.timeout(120_000) })).arrayBuffer())
+    if (out.length >= buf.length * 0.98) return { buf, compressed: false, note: '压缩收益<2%,保留原图' }
+    return { buf: out, compressed: true, note: '' }
   }
-  // JPEG: 扫 SOF0/2
+  throw new Error('TinyPNG 所有 key 均不可用')
+}
+
+// ---------- 落地 ----------
+function bumpFilename(dir, base, ext) {
+  // 换同路径图片必须升文件名防缓存:foo.png → foo_v2.png → …
+  let name = `${base}.${ext}`, n = 1
+  while (fs.existsSync(path.join(dir, name))) { n += 1; name = `${base}_v${n}.${ext}` }
+  return name
+}
+
+function pngSize(buf) {
+  if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }
   if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
-    let i = 2;
+    let i = 2
     while (i < buf.length - 9) {
-      if (buf[i] !== 0xff) { i++; continue; }
-      const marker = buf[i + 1];
-      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-        return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
-      }
-      const len = buf.readUInt16BE(i + 2);
-      i += 2 + len;
+      if (buf[i] !== 0xff) { i++; continue }
+      const m = buf[i + 1]
+      if (m >= 0xc0 && m <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(m)) return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) }
+      i += 2 + buf.readUInt16BE(i + 2)
     }
   }
-  return null;
+  return { w: 0, h: 0 }
 }
 
-// sharp 为可选依赖:未安装时跳过降分辨率,只做 TinyPNG(其 resize 也能兜底)
-async function sharpDownscale(buf, w, h) {
-  try {
-    const mod = await import('sharp');
-    const sharp = mod.default ?? mod;
-    return await sharp(buf).resize(w, h).png().toBuffer();
-  } catch {
-    console.warn('[miniart] 未安装 sharp,跳过降分辨率(TinyPNG resize 会兜底)');
-    return buf;
-  }
-}
-
-// ---------- 防缓存文件名 ----------
-function bumpFilename(dir, base, ext) {
-  // 换同路径图片必须升文件名:foo.png → foo_v2.png → foo_v3.png …
-  let name = `${base}.${ext}`;
-  let n = 1;
-  while (fs.existsSync(path.join(dir, name))) {
-    n += 1;
-    name = `${base}_v${n}.${ext}`;
-  }
-  return name;
-}
-
-// ---------- 主包体积红线 ----------
 function dirSize(dir) {
-  let total = 0;
-  if (!fs.existsSync(dir)) return 0;
+  let t = 0
+  if (!fs.existsSync(dir)) return 0
   for (const f of fs.readdirSync(dir, { recursive: true })) {
-    const p = path.join(dir, f);
-    if (fs.statSync(p).isFile()) total += fs.statSync(p).size;
+    const p = path.join(dir, f)
+    if (fs.statSync(p).isFile()) t += fs.statSync(p).size
   }
-  return total;
+  return t
 }
 
 // ---------- 主流程 ----------
 async function main() {
-  const args = parseArgs(process.argv);
-  if (args.help) {
-    console.log('用法: node gen.mjs -c art.config.json -p prompts.txt [--out dir] [--dry-run]');
-    process.exit(0);
+  const promptsFile = path.resolve(opts.prompts)
+  if (!fs.existsSync(promptsFile)) die(`提示词文件不存在: ${promptsFile}`)
+  const items = []
+  const seen = new Set()
+  for (const raw of fs.readFileSync(promptsFile, 'utf8').split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const m = line.match(/^([\w-]+)\s*\|\s*(.+)$/)
+    const name = m ? m[1] : line.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'img'
+    if (seen.has(name)) die(`提示词名称重复: ${name}`)
+    seen.add(name)
+    items.push({ name, text: m ? m[2] : line })
   }
-  const cfg = loadConfig(args.config);
-  const prompts = loadPrompts(args.prompts);
+  if (items.length === 0) die('提示词文件为空')
 
-  const outDir = path.resolve(args.out || cfg.output.inPackage || 'generated');
-  fs.mkdirSync(outDir, { recursive: true });
-  const manifestPath = path.join(outDir, 'manifest.json');
-  const manifest = fs.existsSync(manifestPath)
-    ? JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-    : { version: VERSION, items: [] };
+  const outDir = path.resolve(opts.out || cfg.output.inPackage || 'generated')
+  fs.mkdirSync(outDir, { recursive: true })
+  const manifestPath = path.join(outDir, 'manifest.json')
+  const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, 'utf8')) : { version: VERSION, items: [] }
 
-  const tinyKey = process.env[cfg.compress.tinypngKeyEnv || 'TINYPNG_API_KEY'];
-  if (!tinyKey) {
-    console.warn('[miniart] 警告: 未设置 TinyPNG key,图片将只降分辨率不压缩(TINYPNG_API_KEY)');
+  // 并发单元:每条提示词 × count
+  const units = []
+  for (const p of items) for (let k = 0; k < opts.count; k++) units.push({ ...p, seq: units.length })
+
+  console.log(`[art] ${items.length} 条提示词 × ${opts.count} = ${units.length} 张 | 并发 ${concurrency} | 模型: ${cfg.api.models.join(', ')} | ${imageConfig.aspect_ratio}/${imageConfig.image_size}${refsNote(opts)}`)
+
+  // 关键词优化:可选 LLM 改写(串行,失败回退原文),再统一组装
+  for (const u of units) {
+    if (cfg.prompt?.optimizeModel && !opts.dryRun) u.text = await optimizeWithLLM(cfg, u.text)
+    u.finalPrompt = composePrompt(cfg, u.text)
   }
-  const maxKB = cfg.compress.maxKB ?? 180;
-  const redLineMB = cfg.compress.packageRedLineMB ?? 2;
-
-  console.log(`[miniart] ${prompts.length} 条提示词 | 模型: ${cfg.api.models.join(', ')}`);
-  if (args.dryRun) {
-    for (const p of prompts) {
-      console.log(`\n[dry-run] name=${p.name}\n  最终提示词: ${composePrompt(cfg, p.text)}`);
-    }
-    process.exit(0);
+  if (opts.dryRun) {
+    for (const u of units) console.log(`\n[dry-run] ${u.name}: ${u.finalPrompt}`)
+    process.exit(0)
   }
 
-  for (const p of prompts) {
-    const finalPrompt = composePrompt(cfg, p.text);
-    console.log(`\n[生图] ${p.name}: ${finalPrompt}`);
-    let ok = false;
-    for (const model of cfg.api.models) {
+  const refs = loadRefs()
+  const keys = tinifyKeys(cfg)
+  const dead = new Set()
+  const stats = { totalCost: 0, compressionCount: null, failed: 0 }
+
+  async function worker(queue) {
+    while (queue.length) {
+      const u = queue.shift()
+      const t0 = Date.now()
       try {
-        const t0 = Date.now();
-        const r = await generateImage(cfg, finalPrompt, model);
-        if (r.images.length === 0) {
-          console.warn(`  [${model}] 未返回图片, content: ${r.content.slice(0, 80)} → 换下一个模型`);
-          continue;
+        let r = null
+        for (const model of cfg.api.models) {
+          try {
+            r = await generateImage(cfg, model, u.finalPrompt, refs)
+            if (r.images.length === 0) { console.warn(`  [${u.name}] [${model}] 未返回图片(${r.text.slice(0, 60)})→ 换模型`); continue }
+            u.model = model; break
+          } catch (e) { console.warn(`  [${u.name}] [${model}] ${e.message} → 换模型`) }
         }
+        if (!r || r.images.length === 0) { stats.failed++; console.error(`  ✗ ${u.name} 全部模型失败`); continue }
         for (let idx = 0; idx < r.images.length; idx++) {
-          const img = r.images[idx];
-          const buf = await downscaleToTargets(img.buf, cfg, p.name, idx);
-          const final = await compressAndSave(buf, cfg, outDir, p.name, idx, tinyKey, maxKB);
+          const img = r.images[idx]
+          const c = await tinifyCompress(img.buf, keys, dead, stats)
+          const file = bumpFilename(outDir, u.name, img.ext)
+          fs.writeFileSync(path.join(outDir, file), c.buf)
+          const dim = pngSize(c.buf)
           manifest.items.push({
-            name: idx === 0 ? p.name : `${p.name}_${idx + 1}`,
-            prompt: finalPrompt,
-            model,
-            cost: r.cost / r.images.length,
-            width: final.width, height: final.height,
-            file: final.file, bytes: final.bytes,
-            at: new Date().toISOString(),
-          });
-          console.log(`  [${model}] ${final.file} ${final.width}x${final.height} ${(final.bytes / 1024).toFixed(0)}KB`);
+            name: r.images.length === 1 ? u.name : `${u.name}_${idx + 1}`,
+            prompt: u.finalPrompt, model: u.model, cost: +(r.cost / r.images.length).toFixed(4),
+            width: dim.w, height: dim.h, bytes: c.buf.length,
+            compressed: c.compressed, ref: refs.length > 0,
+            ratio: imageConfig.aspect_ratio, size: imageConfig.image_size,
+            elapsedSec: Math.round((Date.now() - t0) / 1000), at: new Date().toISOString(),
+          })
+          stats.totalCost += r.cost / r.images.length
+          const warn = c.buf.length > maxKB * 1024 ? ` ⚠ 超过 ${maxKB}KB,请人工处理(不自动二次压缩,保色彩保清晰)` : ''
+          console.log(`  ✓ ${u.name} ← [${u.model}] ${file} ${dim.w}x${dim.h} ${(c.buf.length / 1024).toFixed(0)}KB ${Math.round((Date.now() - t0) / 1000)}s${c.compressed ? '' : `(${c.note})`}${warn}`)
         }
-        ok = true;
-        break;
       } catch (e) {
-        console.warn(`  [${model}] 失败: ${e.message} → 换下一个模型`);
+        stats.failed++
+        console.error(`  ✗ ${u.name}: ${e.message}`)
       }
     }
-    if (!ok) console.error(`  ✗ ${p.name} 所有模型均失败,跳过(可修提示词后重跑)`);
   }
+  const queue = [...units]
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => worker(queue)))
 
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-  console.log(`\n[manifest] 已写入 ${manifestPath}(共 ${manifest.items.length} 条)`);
-
-  const size = dirSize(outDir);
-  const limit = redLineMB * 1024 * 1024;
-  console.log(`[红线] ${outDir} 当前 ${(size / 1024 / 1024).toFixed(2)}MB / 上限 ${redLineMB}MB ${size > limit ? '❌ 超红线!' : '✅'}`);
-  if (size > limit) process.exit(2);
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
+  console.log(`\n[manifest] ${manifestPath}(累计 ${manifest.items.length} 条)`)
+  console.log(`[成本] 本次 $${stats.totalCost.toFixed(3)}${stats.compressionCount !== null ? ` | TinyPNG 本月已用 ${stats.compressionCount} 张` : ''}`)
+  const size = dirSize(outDir)
+  const over = size > maxTotalMB * 1024 * 1024
+  console.log(`[红线] ${outDir} ${(size / 1048576).toFixed(2)}MB / ${maxTotalMB}MB ${over ? '❌ 超限' : '✅'}`)
+  if (stats.failed > 0) process.exit(3)
+  if (over) process.exit(2)
 }
 
-function composePrompt(cfg, text) {
-  const noText = ' 画面中不得出现任何文字、字母、数字';
-  return `${cfg.style}, ${text}.${noText}`;
+function refsNote(opts) {
+  return opts.refs ? ` | 参考图 ${opts.refs.length} 张` : ''
 }
 
-function downscaleToTargets(buf, cfg, name, idx) {
-  const targets = cfg.compress.resize || {};
-  const rule = targets[name] ?? targets[`${name.split('-')[0]}-*`] ?? targets['*'] ?? null;
-  if (!rule) return Promise.resolve(buf);
-  return downscale(buf, rule);
-}
-
-async function compressAndSave(buf, cfg, outDir, baseName, idx, tinyKey, maxKB) {
-  let finalBuf = buf;
-  let ext = cfg.compress.format === 'jpeg' ? 'jpg' : 'png';
-  if (tinyKey) {
-    let compressed = await tinifyFromBuffer(tinyKey, buf);
-    if (compressed.length > maxKB * 1024) {
-      // 二次压:再送 TinyPNG 一轮(它对 PNG8/JPEG 自动选格式)
-      compressed = await tinifyFromBuffer(tinyKey, compressed);
-    }
-    finalBuf = compressed;
-    if (compressed.length > maxKB * 1024) {
-      console.warn(`  ⚠ 压缩后仍 ${Math.round(compressed.length / 1024)}KB > ${maxKB}KB,保留但请人工检查`);
-    }
-  }
-  const file = bumpFilename(outDir, baseName, ext);
-  fs.writeFileSync(path.join(outDir, file), finalBuf);
-  const dim = readPngOrJpegSize(finalBuf) || { w: 0, h: 0 };
-  return { file, bytes: finalBuf.length, width: dim.w, height: dim.h };
-}
-
-main().catch((e) => { die(e.stack || e.message); });
+main().catch((e) => die(e.stack || e.message))

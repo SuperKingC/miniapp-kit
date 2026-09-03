@@ -5,9 +5,10 @@
   "type": "module",
   "description": "小程序通用工具箱:art(美术资产生图流水线)等跨项目工具集",
   "scripts": {
-    "gen": "node art/gen.mjs -c art.config.json -p prompts.txt"
+    "gen": "node art/gen.mjs -c art.config.json -p prompts.txt",
+    "upload-cos": "node cos/upload-cos.mjs"
   },
   "optionalDependencies": {
-    "sharp": "^0.33.0"
+    "cos-nodejs-sdk-v5": "^1.4.0"
   }
 }
