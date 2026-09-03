@@ -62,6 +62,8 @@ check('SAM2 权重(SAM2_CHECKPOINT)', !!ckpt && fs.existsSync(ckpt), ckpt ? (fs.
 const hfCache = path.join(os.homedir(), '.cache', 'huggingface', 'hub')
 const vitmatteCached = fs.existsSync(hfCache) && fs.readdirSync(hfCache).some((d) => d.includes('vitmatte'))
 check('ViTMatte 模型缓存(可选,精修用)', vitmatteCached, vitmatteCached ? '已缓存' : '未缓存(不用 --vitmatte 则不影响)', '首次跑 --vitmatte 时自动从 HuggingFace 下载,需网络')
+const ben2 = process.env.BEN2_WEIGHTS?.trim()
+check('BEN2 权重(BEN2_WEIGHTS,抠图首选)', !!ben2 && fs.existsSync(ben2), ben2 ? (fs.existsSync(ben2) ? ben2 : `路径不存在: ${ben2}`) : '未设置(ben2 抠图法不可用)', '下载 BEN2_Base.safetensors(HuggingFace PramaLLC/BEN2,约380MB)后设 BEN2_WEIGHTS')
 
 // 汇总
 console.log('═══ miniapp-kit 环境体检 ═══\n')

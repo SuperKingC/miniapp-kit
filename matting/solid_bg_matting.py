@@ -108,13 +108,37 @@ def vitmatte_alpha(img_rgb, mask, model_name):
     return (np.clip(alphas, 0, 1) * 255).astype(np.uint8)
 
 
+# ---------- 方法三:BEN2(全自动,置信度引导抠图,MIT) ----------
+def ben2_alpha(img_rgb, weights):
+    import sys
+    import torch
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from BEN2 import BEN_Base
+    from safetensors.torch import load_file
+
+    model = BEN_Base()
+    p = Path(weights)
+    if p.suffix == ".safetensors":
+        model.load_state_dict(load_file(str(p)), strict=True)  # 官方 loadcheckpoints 只认 .pth,这里直接映射 safetensors
+    else:
+        model.loadcheckpoints(str(p))
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device).eval()
+    with torch.no_grad():
+        pil = Image.fromarray(img_rgb)
+        out = model.inference(pil)  # 返回 list[PIL RGBA]
+    rgba = out[0] if isinstance(out, list) else out
+    return np.array(rgba.getchannel("A"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("image")
     ap.add_argument("outdir")
-    ap.add_argument("--method", default="both", choices=["chroma", "sam2", "both"])
+    ap.add_argument("--method", default="both", choices=["chroma", "sam2", "ben2", "both", "all"])
     ap.add_argument("--bg", default="auto", help="auto=四角均色,或 R,G,B")
     ap.add_argument("--sam2-ckpt", default=os.environ.get("SAM2_CHECKPOINT", ""))
+    ap.add_argument("--ben2-weights", default=os.environ.get("BEN2_WEIGHTS", ""), help="BEN2_Base.safetensors 或 .pth 路径")
     ap.add_argument("--vitmatte", action="store_true", help="SAM2 mask 后用 ViTMatte 精修 alpha")
     ap.add_argument("--model", default="hustvl/vitmatte-small-composition-1k")
     ap.add_argument("--device", default="cuda" if os.environ.get("FORCE_CPU", "") != "1" else "cpu")
@@ -129,9 +153,9 @@ def main():
     stem = img_p.stem
 
     results = {}
-    if args.method in ("chroma", "both"):
+    if args.method in ("chroma", "both", "all"):
         results["chroma"] = chroma_key(img_rgb, bg_rgb)
-    if args.method in ("sam2", "both"):
+    if args.method in ("sam2", "both", "all"):
         if not args.sam2_ckpt:
             raise SystemExit("sam2 方法需要 --sam2-ckpt 或环境变量 SAM2_CHECKPOINT")
         mask = (sam2_mask(img_rgb, args.sam2_ckpt, args.device) * 255).astype(np.uint8)
@@ -142,6 +166,10 @@ def main():
                 print(f"  [vitmatte] 精修失败({e}),退回 SAM2 mask 羽化")
         if "sam2+vitmatte" not in results:
             results["sam2"] = cv2.GaussianBlur(mask, (3, 3), 0)
+    if args.method in ("ben2", "all"):
+        if not args.ben2_weights:
+            raise SystemExit("ben2 方法需要 --ben2-weights 或环境变量 BEN2_WEIGHTS")
+        results["ben2"] = ben2_alpha(img_rgb, args.ben2_weights)
 
     panels = [img_rgb.copy()]
     names = ["original"]

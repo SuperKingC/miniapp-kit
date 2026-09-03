@@ -1,8 +1,4 @@
-node_modules/
-art.config.json
-generated/
-manifest.json
-*.local
-.env*
+matting/*.safetensors
+matting/*.pth
+matting/*.onnx
 matting/out/
-smoke_out/

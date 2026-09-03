@@ -80,10 +80,12 @@ node <本仓库>/art/gen.mjs -c <项目根>/art.config.json \
 ## 抠图(matting/)
 
 ```bash
-# 任意装了 cv2 的 python:色键法(快、确定性,要求背景色全图唯一)
+# BEN2:全自动(无需提示),置信度引导 alpha 抠图,MIT。**首选**;权重 BEN2_WEIGHTS 环境变量指向 .safetensors/.pth
+python matting/solid_bg_matting.py <图> <输出目录> --method ben2 --ben2-weights <BEN2_Base.safetensors路径>
+# SAM2:点+box 提示的语义分割,适合 BEN2 失误时的兜底与交互修图;权重 SAM2_CHECKPOINT
+python matting/solid_bg_matting.py <图> <输出目录> --method sam2 --sam2-ckpt <sam2.1_hiera_small.pt路径>
+# 色键:零依赖最快,但要求背景色全图唯一(主体内出现背景近色必翻车),仅用于快速粗抠
 python matting/solid_bg_matting.py <图> <输出目录> --method chroma
-# 需 torch+sam2+transformers 的环境(有权重):SAM2 语义分割,背景色无关,实测对白底/彩底、主体含背景近色都稳
-python matting/solid_bg_matting.py <图> <输出目录> --method sam2 --sam2-ckpt <权重路径> [--vitmatte]
 ```
 
-实测结论(卡通素材,2048px):**SAM2(中心+底部点提示 + box 约束)是首选**,白底/品红底均完整保住主体内的背景近色区域(白胸、白爪、眼高光);色键法依赖"背景色全图唯一",主体内部出现背景近色(如粉色嘴腔用品红底)会被误抠。ViTMatte 精修对 trimap 构造敏感,卡通素材上默认不用。
+三种方法实测(卡通素材,2048px,2026-09):**BEN2 全自动且两张(白底/品红底)均完美**——品红底下嘴腔内的粉色(背景近色)没被误抠,白底下胸毛/爪子/胡须完整,边缘是柔和的 alpha 羽化;SAM2 同样两张满分但需要点提示;色键法在品红底把嘴抠穿。**结论:默认 BEN2,SAM2 兜底,色键粗筛。** 换新环境先跑 `node doctor.mjs` 查抠图依赖是否齐全,缺什么经确认再装。
